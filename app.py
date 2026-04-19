@@ -16,8 +16,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-
-# ✅ Allow all origins (easy for now)
 CORS(app)
 
 # ───────────────────────────────────────
@@ -46,20 +44,27 @@ else:
     ]
 
 # ───────────────────────────────────────
-# LOAD MODEL
+# MODEL LOADING (LAZY)
 # ───────────────────────────────────────
+model = None
+
 def load_model():
-    model = models.resnet18(weights=None)
-    num_ftrs = model.fc.in_features
-    model.fc = nn.Linear(num_ftrs, NUM_CLASSES)
+    logger.info("🔄 Loading model...")
+    m = models.resnet18(weights=None)
+    num_ftrs = m.fc.in_features
+    m.fc = nn.Linear(num_ftrs, NUM_CLASSES)
 
-    model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
-    model.eval()
+    m.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
+    m.eval()
 
-    logger.info("✅ ResNet18 model loaded")
+    logger.info("Model loaded")
+    return m
+
+def get_model():
+    global model
+    if model is None:
+        model = load_model()
     return model
-
-model = load_model()
 
 # ───────────────────────────────────────
 # IMAGE TRANSFORM
@@ -82,6 +87,7 @@ def health():
     return jsonify({
         "status": "ok",
         "message": "DL Model API Running",
+        "model_loaded": model is not None,
         "timestamp": datetime.utcnow().isoformat()
     })
 
@@ -89,13 +95,23 @@ def health():
 @app.route("/predict_disease", methods=["POST"])
 def predict_disease():
     try:
+        logger.info("Request received")
+
         if "file" not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
 
         file = request.files["file"]
 
+        # Load and resize image (IMPORTANT)
         image = Image.open(io.BytesIO(file.read())).convert("RGB")
+        image = image.resize((224, 224))
+
+        logger.info("Image processed")
+
         input_tensor = transform(image).unsqueeze(0)
+
+        model = get_model()
+        logger.info("Model ready")
 
         with torch.no_grad():
             output = model(input_tensor)
@@ -104,13 +120,15 @@ def predict_disease():
 
         disease = CLASS_NAMES[idx.item()]
 
+        logger.info(f"Prediction: {disease}")
+
         return jsonify({
             "predicted_disease": disease,
             "confidence": round(confidence.item() * 100, 2)
         })
 
     except Exception as e:
-        logger.error("❌ Error: %s", str(e))
+        logger.error("Error: %s", str(e))
         return jsonify({
             "error": "Prediction failed",
             "detail": str(e)
@@ -122,4 +140,5 @@ def predict_disease():
 # ───────────────────────────────────────
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    logger.info(f"Server starting on port {port}")
     app.run(host="0.0.0.0", port=port)
