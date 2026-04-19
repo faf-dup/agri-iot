@@ -25,8 +25,8 @@ CORS(app)
 MODEL_PATH = os.environ.get("MODEL_PATH", "resnet18_disease_model.pth")
 NUM_CLASSES = 8
 
-# ⚠ MUST match training order
-CLASS_NAMES = [
+# ⚠ IMPORTANT: MUST match training (sorted)
+CLASS_NAMES = sorted([
     "Apple__Apple_scab",
     "Apple__Black_rot",
     "Apple__Cedar_apple_rust",
@@ -35,7 +35,7 @@ CLASS_NAMES = [
     "Corn_(maize)__healthy",
     "Grape__Black_rot",
     "Grape__Esca(Black_Measles)"
-]
+])
 
 # ───────────────────────────────────────
 # DEVICE
@@ -68,7 +68,7 @@ def get_model():
     return model
 
 # ───────────────────────────────────────
-# TRANSFORM (MATCH TRAINING)
+# TRANSFORM (EXACT TRAINING MATCH)
 # ───────────────────────────────────────
 transform = transforms.Compose([
     transforms.Resize(256),
@@ -84,53 +84,45 @@ transform = transforms.Compose([
 # TREATMENT DB
 # ───────────────────────────────────────
 TREATMENT_DB = {
-
     "Apple__Apple_scab": {
         "status": "Diseased 🔴",
-        "description": "Fungal infection causing olive-green to dark lesions on leaves and fruits.",
-        "treatment": "Apply fungicides like captan or myclobutanil. Remove infected leaves and improve air circulation."
+        "description": "Fungal infection causing olive-green lesions.",
+        "treatment": "Use fungicides like captan."
     },
-
     "Apple__Black_rot": {
         "status": "Diseased 🔴",
-        "description": "Dark rot on fruits and spots on leaves and branches.",
-        "treatment": "Prune infected areas and apply copper-based fungicides."
+        "description": "Dark rot on fruits.",
+        "treatment": "Prune infected parts."
     },
-
     "Apple__Cedar_apple_rust": {
         "status": "Diseased 🔴",
-        "description": "Rust disease causing yellow-orange spots on leaves.",
-        "treatment": "Use fungicides like propiconazole and avoid cedar trees nearby."
+        "description": "Yellow-orange leaf spots.",
+        "treatment": "Use propiconazole fungicide."
     },
-
     "Apple__healthy": {
         "status": "Healthy 🟢",
-        "description": "No disease symptoms detected.",
-        "treatment": "Maintain regular watering and fertilization."
+        "description": "No disease.",
+        "treatment": "Maintain care."
     },
-
     "Corn_(maize)__Northern_Leaf_Blight": {
         "status": "Diseased 🔴",
-        "description": "Gray-green lesions on leaves reducing yield.",
-        "treatment": "Use resistant varieties and apply fungicides early."
+        "description": "Gray lesions.",
+        "treatment": "Use resistant varieties."
     },
-
     "Corn_(maize)__healthy": {
         "status": "Healthy 🟢",
-        "description": "Plant is healthy.",
-        "treatment": "Continue proper nutrient and water management."
+        "description": "Healthy plant.",
+        "treatment": "Normal care."
     },
-
     "Grape__Black_rot": {
         "status": "Diseased 🔴",
-        "description": "Dark lesions and shriveled fruits.",
-        "treatment": "Apply fungicides like mancozeb and remove infected debris."
+        "description": "Shriveled fruits.",
+        "treatment": "Apply fungicide."
     },
-
     "Grape__Esca(Black_Measles)": {
         "status": "Diseased 🔴",
-        "description": "Leaf discoloration and vine decline.",
-        "treatment": "Prune infected wood. No complete cure available."
+        "description": "Leaf discoloration.",
+        "treatment": "Prune infected wood."
     }
 }
 
@@ -158,7 +150,7 @@ def predict():
 
         file = request.files["file"]
 
-        # preprocess image
+        # preprocess
         image = Image.open(io.BytesIO(file.read())).convert("RGB")
         input_tensor = transform(image).unsqueeze(0).to(device)
 
@@ -167,6 +159,10 @@ def predict():
         with torch.no_grad():
             output = model(input_tensor)
             probs = torch.softmax(output, dim=1)[0]
+
+            # 🔥 DEBUG (VERY IMPORTANT)
+            logger.info(f"Raw probabilities: {probs.tolist()}")
+
             confidence, idx = torch.max(probs, 0)
 
         predicted_class = CLASS_NAMES[idx.item()]
@@ -177,7 +173,7 @@ def predict():
         treatment_info = TREATMENT_DB.get(predicted_class, {})
 
         return jsonify({
-            "predicted_disease": predicted_class,   # ✅ same as before
+            "predicted_disease": predicted_class,
             "confidence": confidence,
             "status": treatment_info.get("status"),
             "description": treatment_info.get("description"),
